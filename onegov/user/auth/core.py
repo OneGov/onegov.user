@@ -2,48 +2,12 @@ import morepath
 
 from datetime import datetime
 from itsdangerous import URLSafeSerializer, BadSignature
-from onegov.core.utils import is_valid_yubikey
+
 from onegov.core.utils import relative_url
 from onegov.user import log
 from onegov.user.collections import UserCollection
 from onegov.user.errors import ExpiredSignupLinkError
-
-
-class AuthFactor(object):
-    """ A registry of auth factors. """
-
-    registry = {}
-
-    def __init_subclass__(cls, type, **kwargs):
-        assert type not in cls.registry
-        cls.registry[type] = cls
-        super().__init_subclass__(**kwargs)
-
-
-class YubikeyFactor(AuthFactor, type='yubikey'):
-    """ Implements a yubikey factor for the :class:`Auth` class. """
-
-    def __init__(self, **kwargs):
-        self.yubikey_client_id = kwargs.pop('yubikey_client_id', None)
-        self.yubikey_secret_key = kwargs.pop('yubikey_secret_key', None)
-
-    @classmethod
-    def args_from_app(cls, app):
-        return {
-            'yubikey_client_id': getattr(app, 'yubikey_client_id', None),
-            'yubikey_secret_key': getattr(app, 'yubikey_secret_key', None)
-        }
-
-    def is_configured(self):
-        return self.yubikey_client_id and self.yubikey_secret_key
-
-    def is_valid(self, user_specific_config, factor):
-        return is_valid_yubikey(
-            client_id=self.yubikey_client_id,
-            secret_key=self.yubikey_secret_key,
-            expected_yubikey_id=user_specific_config,
-            yubikey=factor
-        )
+from onegov.user.auth.second_factor import SECOND_FACTORS
 
 
 class Auth(object):
@@ -73,7 +37,7 @@ class Auth(object):
         # initialize nth factors
         self.factors = {}
 
-        for type, cls in AuthFactor.registry.items():
+        for type, cls in SECOND_FACTORS.items():
             obj = cls(**kwargs)
 
             if obj.is_configured():
@@ -83,7 +47,7 @@ class Auth(object):
     def from_app(cls, app, to='/', skip=False, signup_token=None):
         kwargs = {}
 
-        for factor in AuthFactor.registry.values():
+        for factor in SECOND_FACTORS.values():
             kwargs.update(factor.args_from_app(app))
 
         return cls(
@@ -138,6 +102,14 @@ class Auth(object):
         return morepath.redirect(request.transform(self.to))
 
     def skippable(self, request):
+        """ Returns true if the login for the current `to` target is optional
+        (i.e. it is not required to access the page).
+
+        This should only be used on protected pages as public pages would
+        always be skipppable. Therefore it has to be enabled manually by
+        specifying `skip=True` on the :class:`Auth` class.
+
+        """
 
         if not self.skip:
             return False
@@ -151,7 +123,22 @@ class Auth(object):
         except KeyError:
             return False
 
+    def autologin(self, request):
+        """ Tries to automatically login the given request using third-party
+        authentication providers. If the method returns true, the login form
+        may be skipped (not unlike :meth:`skippable`).
+
+        Unlike :meth:`skippable`, this method should be calle every time the
+        login view is shown and if it returns true, the request should be
+        redirected to `self.to`.
+
+        """
+
+        return False
+
     def is_valid_second_factor(self, user, second_factor_value):
+        """ Returns true if the second factor of the given user is valid. """
+
         if not user.second_factor:
             return True
 
@@ -248,6 +235,8 @@ class Auth(object):
 
     @property
     def permitted_role_for_registration(self):
+        """ Returns the permitted role for the current signup token. """
+
         if not self.signup_token:
             return 'member'
 
