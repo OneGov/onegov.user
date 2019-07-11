@@ -18,6 +18,8 @@ class AuthenticationProvider(metaclass=ABCMeta):
         assert type not in AUTHENTICATION_PROVIDERS
         assert hasattr(cls, 'title')
 
+        cls.type = type
+
         AUTHENTICATION_PROVIDERS[type] = cls
 
         super().__init_subclass__(**kwargs)
@@ -31,7 +33,9 @@ class AuthenticationProvider(metaclass=ABCMeta):
         proper configuration are excluded.
 
         """
-        return request.session.query(User)
+        return request.session.query(User)\
+            .filter_by(active=True)\
+            .filter(User['authentication_provider']['type'] == self.type)
 
     @abstractmethod
     def identify(self, request):
