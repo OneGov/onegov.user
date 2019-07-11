@@ -128,9 +128,12 @@ class Auth(object):
         authentication providers. If the method returns true, the login form
         may be skipped (not unlike :meth:`skippable`).
 
-        Unlike :meth:`skippable`, this method should be calle every time the
+        Unlike :meth:`skippable`, this method should be called every time the
         login view is shown and if it returns true, the request should be
         redirected to `self.to`.
+
+        Like the name suggest, this method may log in a not-yet logged in
+        user during its runtime.
 
         """
 

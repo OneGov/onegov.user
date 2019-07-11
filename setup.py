@@ -34,6 +34,7 @@ setup(
     python_requires='>=3.6',
     install_requires=[
         'click',
+        'kerberos>=1.3.0',
         'furl',
         'itsdangerous',
         'onegov.core>=0.78.0',
