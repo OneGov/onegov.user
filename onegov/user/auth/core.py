@@ -70,31 +70,6 @@ class Auth(object):
             request, request.transform(request.path), skip, signup_token)
 
     @property
-    def signup_token_serializer(self):
-        assert self.signup_token_secret
-        return URLSafeSerializer(self.signup_token_secret, salt='signup')
-
-    def new_signup_token(self, role, max_age=24 * 60 * 60, max_uses=1):
-        """ Returns a signup token which can be used for users to register
-        themselves, directly gaining the given role.
-
-        Signup tokens are recorded on the user to make sure that only the
-        requested amount of uses is allowed.
-
-        """
-        return self.signup_token_serializer.dumps({
-            'role': role,
-            'max_uses': max_uses,
-            'expires': int(datetime.utcnow().timestamp()) + max_age
-        })
-
-    def decode_signup_token(self, token):
-        try:
-            return self.signup_token_serializer.loads(token)
-        except BadSignature:
-            return None
-
-    @property
     def users(self):
         return UserCollection(self.session)
 
@@ -122,22 +97,6 @@ class Auth(object):
             return request.has_access_to_url(self.to)
         except KeyError:
             return False
-
-    def autologin(self, request):
-        """ Tries to automatically login the given request using third-party
-        authentication providers. If the method returns true, the login form
-        may be skipped (not unlike :meth:`skippable`).
-
-        Unlike :meth:`skippable`, this method should be called every time the
-        login view is shown and if it returns true, the request should be
-        redirected to `self.to`.
-
-        Like the name suggest, this method may log in a not-yet logged in
-        user during its runtime.
-
-        """
-
-        return False
 
     def is_valid_second_factor(self, user, second_factor_value):
         """ Returns true if the second factor of the given user is valid. """
@@ -235,6 +194,31 @@ class Auth(object):
         request.app.forget_identity(response, request)
 
         return response
+
+    @property
+    def signup_token_serializer(self):
+        assert self.signup_token_secret
+        return URLSafeSerializer(self.signup_token_secret, salt='signup')
+
+    def new_signup_token(self, role, max_age=24 * 60 * 60, max_uses=1):
+        """ Returns a signup token which can be used for users to register
+        themselves, directly gaining the given role.
+
+        Signup tokens are recorded on the user to make sure that only the
+        requested amount of uses is allowed.
+
+        """
+        return self.signup_token_serializer.dumps({
+            'role': role,
+            'max_uses': max_uses,
+            'expires': int(datetime.utcnow().timestamp()) + max_age
+        })
+
+    def decode_signup_token(self, token):
+        try:
+            return self.signup_token_serializer.loads(token)
+        except BadSignature:
+            return None
 
     @property
     def permitted_role_for_registration(self):
