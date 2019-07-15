@@ -115,23 +115,32 @@ class Auth(object):
         else:
             raise NotImplementedError
 
-    def login(self, username, password, client='unknown', second_factor=None):
-        """ Takes the given username and password and matches them against
-        the users collection.
+    def authenticate(self, username, password,
+                     client='unknown', second_factor=None):
+        """ Takes the given username and password and matches them against the
+        users collection. This does not login the user, use :meth:`login_to` to
+        accomplish that.
 
-        :meth:`login_to` should be the preferred method in most cases, as it
-        sets up automatic logging of login attempts and provides optional
-        login/logout messages.
+        :param username:
+            The username to authenticate.
 
-        :return: An identity bound to the ``application_id`` if the username
-        and password match.
+        :param password:
+            The password of the user (clear-text).
+
+        :param client:
+            The client address of the user (i.e. his IP address).
+
+        :param second_factor:
+            The value of the second factor or None.
+
+        :return: The matched user, if successful, or None.
 
         """
 
         user = self.users.by_username_and_password(username, password)
 
         def fail():
-            log.info("Failed login by {} ({})".format(client, username))
+            log.info(f"Failed login by {client} ({username})")
             return None
 
         if user is None:
@@ -143,7 +152,11 @@ class Auth(object):
         if not self.is_valid_second_factor(user, second_factor):
             return fail()
 
-        log.info("Successful login by {} ({})".format(client, username))
+        log.info(f"Successful login by {client} ({username})")
+        return user
+
+    def as_identity(self, user):
+        """ Returns the morepath identity of the given user. """
 
         return self.identity_class(
             userid=user.username,
@@ -151,6 +164,11 @@ class Auth(object):
             role=user.role,
             application_id=self.application_id
         )
+
+    def by_identity(self, identity):
+        """ Returns the user record of the given identity. """
+
+        return self.users.by_username(identity.userid)
 
     def login_to(self, username, password, request, second_factor=None):
         """ Matches the username and password against the users collection,
@@ -163,18 +181,20 @@ class Auth(object):
 
         """
 
-        identity = self.login(username, password, request.client_addr,
-                              second_factor)
+        user = self.authenticate(
+            username=username,
+            password=password,
+            client=request.client_addr,
+            second_factor=second_factor)
 
-        if identity is None:
+        if user is None:
             return None
 
+        identity = self.as_identity(user)
         response = self.redirect(request)
-        request.app.remember_identity(response, request, identity)
 
-        user = self.users.by_username(username)
-        if user:
-            user.save_current_session(request)
+        request.app.remember_identity(response, request, identity)
+        user.save_current_session(request)
 
         return response
 
@@ -186,19 +206,13 @@ class Auth(object):
 
         """
 
-        user = self.users.by_username(request.identity.userid)
-        if user:
-            user.remove_current_session(request)
+        user = self.by_identity(request.identity)
+        user and user.remove_current_session(request)
 
         response = self.redirect(request)
         request.app.forget_identity(response, request)
 
         return response
-
-    @property
-    def signup_token_serializer(self):
-        assert self.signup_token_secret
-        return URLSafeSerializer(self.signup_token_secret, salt='signup')
 
     def new_signup_token(self, role, max_age=24 * 60 * 60, max_uses=1):
         """ Returns a signup token which can be used for users to register
@@ -213,6 +227,11 @@ class Auth(object):
             'max_uses': max_uses,
             'expires': int(datetime.utcnow().timestamp()) + max_age
         })
+
+    @property
+    def signup_token_serializer(self):
+        assert self.signup_token_secret
+        return URLSafeSerializer(self.signup_token_secret, salt='signup')
 
     def decode_signup_token(self, token):
         try:
