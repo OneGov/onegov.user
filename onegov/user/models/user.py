@@ -118,8 +118,8 @@ class User(Base, TimestampMixin, ORMSearchable):
     #: Example content::
     #:
     #:      {
-    #:          'type': 'kerberos',
-    #:          'data': 'KerberosUserIdentity',
+    #:          'name': 'kerberos',
+    #:          'data': {'username': 'user@EXAMPLE.ORG'},
     #:          'required': True
     #:      }
     #:

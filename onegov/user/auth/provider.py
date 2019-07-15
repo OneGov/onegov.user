@@ -63,7 +63,7 @@ class AuthenticationProvider(metaclass=ABCMeta):
         """
         return request.session.query(User)\
             .filter_by(active=True)\
-            .filter(User['authentication_provider']['type'] == self.type)
+            .filter(User.authentication_provider['name'] == self.metadata.name)
 
     @classmethod
     def configure(cls, **kwargs):
@@ -125,7 +125,6 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
         self.keytab = keytab
         self.hostname = hostname
         self.service = service
-        self.principal = f'{self.service}@{self.self.hostname}'
 
     @property
     def user_fields(self):
@@ -150,7 +149,8 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
 
         with provider.context() as krb:
             try:
-                krb.getServerPrincipalDetails(provider.principal)
+                krb.getServerPrincipalDetails(
+                    provider.service, provider.hostname)
             except krb.KrbError as e:
                 log.warning(f"Kerberos config error: {e}")
             else:
@@ -193,14 +193,20 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
         token = request.headers.get('Authorization')
         token = token and ''.join(token.split()[1:]).strip()
 
-        def with_header(response=None):
-            negotiate = token and f'Negotiate {token}' or 'Negotiate'
+        def with_header(response, include_token=True):
+            if include_token and token:
+                negotiate = f'Negotiate {token}'
+            else:
+                negotiate = 'Negotiate'
+
             response.headers['WWW-Authenticate'] = negotiate
 
             return response
 
         def negotiate():
-            return with_header(HTTPUnauthorized())
+            # only mirror the token back, if it is valid, which is never
+            # the case in the negotiate step
+            return with_header(HTTPUnauthorized(), include_token=False)
 
         # ask for a token
         if not token:
@@ -231,4 +237,6 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
             username = krb.authGSSServerUserName(state)
             selector = User.authentication_provider['data']['username']
 
-            return self.available_users().filter(selector == username).first()
+            return self.available_users(request)\
+                .filter(selector == username)\
+                .first()

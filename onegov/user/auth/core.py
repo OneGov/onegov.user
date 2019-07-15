@@ -149,6 +149,10 @@ class Auth(object):
         if not user.active:
             return fail()
 
+        if user.authentication_provider:
+            if user.authentication_provider.get('required', False):
+                return fail()
+
         if not self.is_valid_second_factor(user, second_factor):
             return fail()
 
@@ -171,10 +175,20 @@ class Auth(object):
         return self.users.by_username(identity.userid)
 
     def login_to(self, username, password, request, second_factor=None):
-        """ Matches the username and password against the users collection,
-        just like :meth:`login`. Unlike said method it returns no identity
-        however, instead a redirect response is returned which will remember
-        the identity.
+        """ Takes a user login request and remembers the user if the
+        authentication completes successfully.
+
+        :param username:
+            The username to log in.
+
+        :param password:
+            The password to log in (cleartext).
+
+        :param request:
+            The request of the user.
+
+        :param second_factor:
+            The second factor, if any.
 
         :return: A redirect response to ``self.to`` with the identity
         remembered as a cookie. If not successful, None is returned.
@@ -189,6 +203,18 @@ class Auth(object):
 
         if user is None:
             return None
+
+        return self.complete_login(user, request)
+
+    def complete_login(self, user, request):
+        """ Takes a user record, remembers its session and returns a proper
+        redirect response to complete the login.
+
+        This method is mostly useful inside onegov.user. You probably want
+        to use :meth:`complete_login` outside of that.
+
+        """
+        assert user is not None
 
         identity = self.as_identity(user)
         response = self.redirect(request)
