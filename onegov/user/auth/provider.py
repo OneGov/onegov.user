@@ -2,25 +2,169 @@ import kerberos
 import os
 
 from abc import ABCMeta, abstractmethod
+from attr import attrs, attrib
+from attr.validators import instance_of, in_
 from contextlib import contextmanager
+from onegov.form import WTFormsClassBuilder
 from onegov.user import _, log
 from onegov.user.models.user import User
 from webob.exc import HTTPUnauthorized
+from wtforms.fields import BooleanField, RadioField, StringField
+from translationstring import TranslationString
+from typing import Optional
 
 
 AUTHENTICATION_PROVIDERS = {}
 
 
+def provider_by_name(providers, name):
+    return next((p for p in providers if p.metadata.name == name), None)
+
+
+@attrs(slots=True, frozen=True)
 class ProviderMetadata(object):
     """ Holds provider-specific metadata. """
 
-    def __init__(self, name, title):
-        self.name = name
-        self.title = title
+    name: str = attrib()
+    title: str = attrib()
 
 
+@attrs(slots=True, frozen=True)
+class UserField(object):
+    """ Defines user-specific field.
+
+    The following properties are required:
+
+        * suffix => part of the attribute name ([a-z_]+)
+        * label => the translatable label of the field
+        * type => the type of the field (currently only 'string')
+
+    """
+
+    field_classes = {'string': StringField}
+
+    suffix: str = attrib()
+    label: str = attrib(validator=instance_of(TranslationString))
+    type: str = attrib(validator=in_(field_classes.keys()))
+
+    @property
+    def field_class(self):
+        return self.field_classes[self.type]
+
+
+def include_provider_form_fields(providers, form_class):
+    """ Extends a form_class with provider selection.
+
+    The form class contains a list of providers to chose from and the
+    configuration necessary on the user for each provider. The providers
+    list is expected to be a list of provider instances.
+
+    The resulting data is automatically applied if the user is used
+    as a base for the model (via the authentication_provider property).
+
+    The form class is always returned with a new authentication_provider
+    that can be stored on the user property of the same name.
+
+    This property is available even if there are no providers - in this case
+    it will always return None.
+
+    """
+
+    class AuthProviderForm(form_class):
+
+        @property
+        def authentication_provider(self):
+            provider = provider_by_name(providers, self.provider.data)
+
+            if not provider:
+                raise ValueError(f"Invalid provider: {self.provider.data}")
+
+            fields = {}
+
+            for field in provider.user_fields:
+                form_field = f'{provider.metadata.name}_{field.suffix}'
+                fields[field.suffix] = getattr(self, form_field).data
+
+            return {
+                'name': provider.metadata.name,
+                'fields': fields,
+                'required': self.provider_required.data,
+            }
+
+        @authentication_provider.setter
+        def authentication_provider(self, data):
+            if not data or not providers:
+                return
+
+            self.provider.data = data['name']
+            self.provider_required.data = data['required']
+
+            for key, value in data['fields'].items():
+                form_field = f"{data['name']}_{key}"
+                getattr(self, form_field).data = value
+
+        def populate_obj(self, model):
+            super().populate_obj(model)
+
+            if not providers or self.provider.data == 'none':
+                model.authentication_provider = self.authentication_provider
+
+        def process_obj(self, model):
+            super().process_obj(model)
+
+            if not providers or not model.authentication_provider:
+                self.authentication_provider = model.authentication_provider
+
+    if not providers:
+        return AuthProviderForm
+
+    choices = [('none', _("None"))]
+    choices.extend((p.metadata.name, p.metadata.title) for p in providers)
+
+    builder = WTFormsClassBuilder(base_class=AuthProviderForm)
+    builder.set_current_fieldset(_("Third-Party Authentication"))
+
+    builder.add_field(
+        field_class=RadioField,
+        field_id='provider',
+        label=_("Provider"),
+        required=False,
+        default='none',
+        choices=choices
+    )
+
+    for provider in providers:
+        for field in provider.user_fields:
+
+            builder.add_field(
+                field_class=field.field_class,
+                field_id=f'{provider.metadata.name}_{field.suffix}',
+                label=field.label,
+                required=True,
+                depends_on=('provider', provider.metadata.name)
+            )
+
+    builder.add_field(
+        field_class=BooleanField,
+        field_id='provider_required',
+        label=_("Force login through provider"),
+        required=False,
+        description=_(
+            "Forces the user to use this provider. Regular username/password "
+            "authentication will be disabled!"
+        ),
+        depends_on=('provider', '!none'))
+
+    return builder.form_class
+
+
+@attrs()
 class AuthenticationProvider(metaclass=ABCMeta):
     """ Base class and registry for third party authentication providers. """
+
+    # stores the 'to' attribute for the integration app
+    # :class:`~onegov.user.integration.UserApp`.
+    to: Optional[str] = attrib(init=False)
 
     def __init_subclass__(cls, metadata, **kwargs):
         global AUTHENTICATION_PROVIDERS
@@ -79,7 +223,7 @@ class AuthenticationProvider(metaclass=ABCMeta):
         return cls()
 
     @property
-    def user_fields(self):
+    def user_fields(self, request):
         """ Optional fields required by the provider on the user. Should return
         something that is iterable (even if only one or no fields are used).
 
@@ -89,29 +233,7 @@ class AuthenticationProvider(metaclass=ABCMeta):
         return ()
 
 
-class UserField(object):
-    """ Defines user-specific field.
-
-    The following properties are required:
-
-        * attr => the attribute name of the field ([a-z_]+)
-        * name => the translatable name of the field
-        * type => the type of the field (currently only 'string')
-        * note => an optional text or callable
-
-    If the note is callable, it receives the current request before the form is
-    rendered. This gives the provider the ability to render something helpful
-    (like the current user id in kerberos).
-
-    """
-
-    def __init__(self, attr, name, type='string', note=None):
-        self.attr = attr
-        self.name = name
-        self.type = type
-        self.note = note
-
-
+@attrs()
 class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
     name='kerberos', title=_("Kerberos (v5)")
 )):
@@ -121,14 +243,13 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
 
     """
 
-    def __init__(self, keytab, hostname, service):
-        self.keytab = keytab
-        self.hostname = hostname
-        self.service = service
+    keytab: str = attrib()
+    hostname: str = attrib()
+    service: str = attrib()
 
     @property
     def user_fields(self):
-        yield UserField('username', _("Kerberos username"), self.username)
+        yield UserField('username', _("Kerberos username"), 'string')
 
     @classmethod
     def configure(cls, **cfg):
@@ -147,11 +268,11 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
 
         provider = cls(keytab, hostname, service)
 
-        with provider.context() as krb:
+        with provider.context():
             try:
-                krb.getServerPrincipalDetails(
+                kerberos.getServerPrincipalDetails(
                     provider.service, provider.hostname)
-            except krb.KrbError as e:
+            except kerberos.KrbError as e:
                 log.warning(f"Kerberos config error: {e}")
             else:
                 return provider
@@ -171,7 +292,7 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
         previous = os.environ.pop('KRB5_KTNAME', None)
         os.environ['KRB5_KTNAME'] = self.keytab
 
-        yield kerberos
+        yield
 
         if previous is not None:
             os.environ['KRB5_KTNAME'] = previous
@@ -213,28 +334,28 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
             return negotiate()
 
         # verify the token
-        with self.context() as krb:
+        with self.context():
 
             # initialization step
-            result, state = krb.authGSSServerInit(self.service)
+            result, state = kerberos.authGSSServerInit(self.service)
 
-            if result != krb.AUTH_GSS_COMPLETE:
+            if result != kerberos.AUTH_GSS_COMPLETE:
                 return negotiate()
 
             # challenge step
-            result = krb.authGSSServerStep(state, token)
+            result = kerberos.authGSSServerStep(state, token)
 
-            if result != krb.AUTH_GSS_COMPLETE:
+            if result != kerberos.AUTH_GSS_COMPLETE:
                 return negotiate()
 
             # extract the final token
-            token = krb.authGSSServerResponse(state)
+            token = kerberos.authGSSServerResponse(state)
 
             # include the token in the response
             request.after(with_header)
 
             # extract the user if possible
-            username = krb.authGSSServerUserName(state)
+            username = kerberos.authGSSServerUserName(state)
             selector = User.authentication_provider['data']['username']
 
             return self.available_users(request)\

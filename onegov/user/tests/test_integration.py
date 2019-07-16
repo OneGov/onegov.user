@@ -7,6 +7,7 @@ import transaction
 from onegov.core import Framework
 from onegov.core.utils import scan_morepath_modules
 from onegov.user import Auth, UserApp, UserCollection
+from onegov.user.auth.provider import provider_by_name
 from tempfile import NamedTemporaryFile
 from unittest.mock import patch, DEFAULT
 from webtest import TestApp as Client
@@ -74,7 +75,7 @@ def client(app):
 
 
 def test_kerberos_auth(client, app):
-    provider = app.provider_by_name('kerberos')
+    provider = provider_by_name(app.providers, 'kerberos')
     assert provider is not None
 
     def auth(headers=None):

@@ -33,6 +33,7 @@ setup(
     platforms='any',
     python_requires='>=3.6',
     install_requires=[
+        'attrs',
         'click',
         'kerberos>=1.3.0',
         'furl',

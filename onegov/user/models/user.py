@@ -119,7 +119,7 @@ class User(Base, TimestampMixin, ORMSearchable):
     #:
     #:      {
     #:          'name': 'kerberos',
-    #:          'data': {'username': 'user@EXAMPLE.ORG'},
+    #:          'fields': {'username': 'user@EXAMPLE.ORG'},
     #:          'required': True
     #:      }
     #:

@@ -3,6 +3,7 @@ from onegov.core.security import Public
 from onegov.user.auth.core import Auth
 from onegov.user.auth.provider import AUTHENTICATION_PROVIDERS
 from onegov.user.auth.provider import AuthenticationProvider
+from onegov.user.auth.provider import provider_by_name
 from onegov.user.models.user import User
 from webob.exc import HTTPForbidden
 from webob.response import Response
@@ -30,11 +31,6 @@ class UserApp(App):
 
         return getattr(self, 'available_providers', ())
 
-    def provider_by_name(self, name):
-        for provider in self.providers:
-            if provider.metadata.name == name:
-                return provider
-
     def configure_authentication_providers(self, **cfg):
 
         def bound(provider):
@@ -57,7 +53,7 @@ class UserApp(App):
     model=AuthenticationProvider,
     path='/auth/provider/{name}')
 def authentication_provider(app, name, to='/'):
-    provider = app.provider_by_name(name)
+    provider = provider_by_name(app.providers, name)
 
     if not provider:
         return None
