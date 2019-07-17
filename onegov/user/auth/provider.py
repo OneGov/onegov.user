@@ -12,6 +12,7 @@ from webob.exc import HTTPUnauthorized
 from wtforms.fields import BooleanField, RadioField, StringField
 from translationstring import TranslationString
 from typing import Optional
+from ua_parser import user_agent_parser
 
 
 AUTHENTICATION_PROVIDERS = {}
@@ -166,6 +167,11 @@ class AuthenticationProvider(metaclass=ABCMeta):
     # :class:`~onegov.user.integration.UserApp`.
     to: Optional[str] = attrib(init=False)
 
+    @property
+    def name(self):
+        """ Needs to be available for the path in the integration app. """
+        return self.metadata.name
+
     def __init_subclass__(cls, metadata, **kwargs):
         global AUTHENTICATION_PROVIDERS
         assert metadata.name not in AUTHENTICATION_PROVIDERS
@@ -193,6 +199,20 @@ class AuthenticationProvider(metaclass=ABCMeta):
         in a way that eventually end up fulfilling the authentication. At the
         very least, providers should ensure that all parameters of the original
         request are kept when asking external services to call back.
+
+        """
+
+    @abstractmethod
+    def button_text(self, request):
+        """ Returns the translatable button text for the given request.
+
+        It is okay to return a static text, if the button remains the same
+        for all requests.
+
+        The translatable text is parsed as markdown, to add weight to
+        the central element of the text. For example::
+
+            Login with **Windows**
 
         """
 
@@ -296,6 +316,21 @@ class KerberosProvider(AuthenticationProvider, metadata=ProviderMetadata(
 
         if previous is not None:
             os.environ['KRB5_KTNAME'] = previous
+
+    def button_text(self, request):
+        """ Returns the request tailored to each OS (users won't understand
+        Kerberos, but for them it's basically their local OS login).
+
+        """
+        agent = user_agent_parser.Parse(request.user_agent or "")
+        agent_os = agent['os']['family']
+
+        if agent_os == "Other":
+            return _("Login with operating system")
+
+        return _("Login with **${operating_system}**", mapping={
+            'operating_system': agent_os
+        })
 
     def authenticate_request(self, request):
         """ Authenticates the kerberos request.

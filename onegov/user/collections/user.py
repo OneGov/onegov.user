@@ -88,6 +88,11 @@ class UserCollection(object):
             User.data['tags'].contains((v, )) for v in values
         ))
 
+    def apply_provider_filter(self, query, key, values):
+        return query.filter(or_(
+            User.authentication_provider['name'] == v for v in values
+        ))
+
     def add(self, username, password, role,
             data=None, second_factor=None, active=True, realname=None,
             signup_token=None, group=None, authentication_provider=None):

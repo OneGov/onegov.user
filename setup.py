@@ -40,7 +40,8 @@ setup(
         'itsdangerous',
         'onegov.core>=0.78.0',
         'onegov.form',
-        'sqlalchemy'
+        'sqlalchemy',
+        'ua-parser',
     ],
     extras_require=dict(
         test=[
