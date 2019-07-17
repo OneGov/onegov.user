@@ -3,7 +3,7 @@ import os
 
 from abc import ABCMeta, abstractmethod
 from attr import attrs, attrib
-from attr.validators import instance_of, in_
+from attr.validators import in_
 from contextlib import contextmanager
 from onegov.form import WTFormsClassBuilder
 from onegov.user import _, log
@@ -45,7 +45,7 @@ class UserField(object):
     field_classes = {'string': StringField}
 
     suffix: str = attrib()
-    label: str = attrib(validator=instance_of(TranslationString))
+    label: TranslationString = attrib()
     type: str = attrib(validator=in_(field_classes.keys()))
 
     @property
