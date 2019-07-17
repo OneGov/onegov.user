@@ -106,13 +106,13 @@ def include_provider_form_fields(providers, form_class):
         def populate_obj(self, model):
             super().populate_obj(model)
 
-            if not providers or self.provider.data == 'none':
+            if providers and self.provider.data != 'none':
                 model.authentication_provider = self.authentication_provider
 
         def process_obj(self, model):
             super().process_obj(model)
 
-            if not providers or not model.authentication_provider:
+            if providers and model.authentication_provider:
                 self.authentication_provider = model.authentication_provider
 
     if not providers:

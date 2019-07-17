@@ -1,4 +1,5 @@
 from morepath import App
+from onegov.core.cache import lru_cache
 from onegov.core.security import Public
 from onegov.user.auth.core import Auth
 from onegov.user.auth.provider import AUTHENTICATION_PROVIDERS
@@ -31,6 +32,10 @@ class UserApp(App):
 
         return getattr(self, 'available_providers', ())
 
+    @lru_cache(maxsize=8)
+    def provider(self, name):
+        return provider_by_name(self.providers, name)
+
     def configure_authentication_providers(self, **cfg):
 
         def bound(provider):
@@ -53,7 +58,7 @@ class UserApp(App):
     model=AuthenticationProvider,
     path='/auth/provider/{name}')
 def authentication_provider(app, name, to='/'):
-    provider = provider_by_name(app.providers, name)
+    provider = app.provider(name)
 
     if not provider:
         return None
